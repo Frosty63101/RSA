@@ -1,3 +1,5 @@
+# chat_app.py
+
 import os
 import re
 import json
@@ -163,16 +165,16 @@ class ChatApp:
 
         # Networking
         self.client_socket = None
-        self.server_socket = None
-        self.other_public_key: Optional[PublicKey] = None
-        self.is_client = False
         self.header_size = 10
         self.port = 5000  # Default port
+
+        # Public keys of other clients
+        self.other_public_keys = {}  # Mapping from nickname to PublicKey
 
         # GUI
         self.window = tk.Tk()
         self.window.title("RSA Chat")
-        self.window.geometry("1000x500")
+        self.window.geometry("800x600")
         self.setup_gui()
 
         # Paths
@@ -186,59 +188,76 @@ class ChatApp:
         entry_width = 20
         ip_entry_width = 30
 
-        # Row 0: Key Generation and Storage
-        tk.Button(self.window, text="Load Stored Keys", command=self.load_stored_keys,
-                    width=button_width).grid(row=0, column=0, padx=5, pady=5)
-        tk.Button(self.window, text="Generate New Keys", command=self.generate_new_keys,
-                    width=button_width).grid(row=0, column=1, padx=5, pady=5)
-        tk.Label(self.window, text="(Press one of the buttons to initialize keys)").grid(row=0, column=2, padx=5, pady=5)
-        tk.Button(self.window, text="Send Public Key", command=self.send_public_key,
-                    width=button_width).grid(row=0, column=3, padx=5, pady=5)
-        self.port_entry = tk.Entry(self.window, width=entry_width)
-        self.port_entry.grid(row=0, column=4, padx=5, pady=5)
+        # Key Frame
+        key_frame = tk.Frame(self.window)
+        key_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+
+        tk.Button(key_frame, text="Load Stored Keys", command=self.load_stored_keys, width=button_width).grid(row=0, column=0, padx=5, pady=5)
+        tk.Button(key_frame, text="Generate New Keys", command=self.generate_new_keys, width=button_width).grid(row=0, column=1, padx=5, pady=5)
+        tk.Label(key_frame, text="(Press one of the buttons to initialize keys)").grid(row=0, column=2, padx=5, pady=5)
+
+        # Key Display Frame
+        key_display_frame = tk.Frame(self.window)
+        key_display_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
+
+        tk.Label(key_display_frame, text="E: ").grid(row=0, column=0, padx=5, pady=5)
+        self.e_entry = tk.Entry(key_display_frame, width=entry_width, state='readonly')
+        self.e_entry.grid(row=0, column=1, padx=5, pady=5)
+        tk.Label(key_display_frame, text="N: ").grid(row=0, column=2, padx=5, pady=5)
+        self.n_entry = tk.Entry(key_display_frame, width=entry_width, state='readonly')
+        self.n_entry.grid(row=0, column=3, padx=5, pady=5)
+        tk.Label(key_display_frame, text="D: ").grid(row=0, column=4, padx=5, pady=5)
+        self.d_entry = tk.Entry(key_display_frame, width=entry_width, state='readonly')
+        self.d_entry.grid(row=0, column=5, padx=5, pady=5)
+
+        # Connection Frame
+        connection_frame = tk.Frame(self.window)
+        connection_frame.grid(row=2, column=0, sticky='ew', padx=5, pady=5)
+
+        tk.Label(connection_frame, text="Server IP:").grid(row=0, column=0, padx=5, pady=5)
+        self.server_ip_entry = tk.Entry(connection_frame, width=ip_entry_width)
+        self.server_ip_entry.grid(row=0, column=1, padx=5, pady=5)
+        tk.Label(connection_frame, text="Port:").grid(row=0, column=2, padx=5, pady=5)
+        self.port_entry = tk.Entry(connection_frame, width=entry_width)
+        self.port_entry.grid(row=0, column=3, padx=5, pady=5)
         self.port_entry.insert(0, str(self.port))
+        tk.Button(connection_frame, text="Connect", command=self.connect_to_server, width=button_width).grid(row=0, column=4, padx=5, pady=5)
 
-        # Row 1: Display E, N, D
-        tk.Label(self.window, text="E: ").grid(row=1, column=0, padx=5, pady=5)
-        self.e_entry = tk.Entry(self.window, width=entry_width, state='readonly')
-        self.e_entry.grid(row=1, column=1, padx=5, pady=5)
-        tk.Label(self.window, text="N: ").grid(row=1, column=2, padx=5, pady=5)
-        self.n_entry = tk.Entry(self.window, width=entry_width, state='readonly')
-        self.n_entry.grid(row=1, column=3, padx=5, pady=5)
-        tk.Label(self.window, text="D: ").grid(row=1, column=4, padx=5, pady=5)
-        self.d_entry = tk.Entry(self.window, width=entry_width, state='readonly')
-        self.d_entry.grid(row=1, column=5, padx=5, pady=5)
-
-        # Row 2: Server and Client Controls
-        tk.Button(self.window, text="Host", command=self.start_server,
-                    width=button_width).grid(row=2, column=0, padx=5, pady=5)
-        tk.Label(self.window, text="Your IP:").grid(row=2, column=1, padx=5, pady=5)
-        self.host_ip_entry = tk.Entry(self.window, width=ip_entry_width, state='readonly')
-        self.host_ip_entry.grid(row=2, column=2, padx=5, pady=5)
-        tk.Label(self.window, text="Server IP:").grid(row=2, column=3, padx=5, pady=5)
-        self.server_ip_entry = tk.Entry(self.window, width=ip_entry_width)
-        self.server_ip_entry.grid(row=2, column=4, padx=5, pady=5)
-        tk.Button(self.window, text="Connect", command=self.connect_to_server,
-                    width=button_width).grid(row=2, column=5, padx=5, pady=5)
-
-        # Row 3: Chat Display and Nickname
-        self.chat_text = tk.Text(self.window, height=10, width=65, state='disabled')
-        self.chat_text.grid(row=3, column=0, columnspan=5, padx=5, pady=5)
-        tk.Label(self.window, text="Nickname:").grid(row=3, column=5, padx=5, pady=5)
-        self.nickname_entry = tk.Entry(self.window, width=20)
-        self.nickname_entry.grid(row=3, column=6, columnspan=2, padx=5, pady=5)
+        # Nickname Frame
+        nickname_frame = tk.Frame(self.window)
+        nickname_frame.grid(row=3, column=0, sticky='ew', padx=5, pady=5)
+        tk.Label(nickname_frame, text="Nickname:").grid(row=0, column=0, padx=5, pady=5)
+        self.nickname_entry = tk.Entry(nickname_frame, width=20)
+        self.nickname_entry.grid(row=0, column=1, padx=5, pady=5)
         self.nickname_entry.insert(tk.END, "Anonymous")
 
-        # Row 4: Message Entry and Send Button
-        tk.Label(self.window, text="Your Message:").grid(row=4, column=0, padx=5, pady=5)
-        self.message_entry = tk.Entry(self.window, width=55)
-        self.message_entry.grid(row=4, column=1, columnspan=3, padx=5, pady=5)
-        tk.Button(self.window, text="Send", command=self.send_message,
-                    width=button_width).grid(row=4, column=4, padx=5, pady=5)
+        # Chat and Clients Frame
+        chat_clients_frame = tk.Frame(self.window)
+        chat_clients_frame.grid(row=4, column=0, sticky='nsew', padx=5, pady=5)
+        self.window.grid_rowconfigure(4, weight=1)
+        self.window.grid_columnconfigure(0, weight=1)
 
-        # Row 5: Disconnect Button
-        tk.Button(self.window, text="Disconnect", command=self.disconnect,
-                    width=button_width).grid(row=5, column=0, padx=5, pady=5)
+        # Chat Text
+        self.chat_text = tk.Text(chat_clients_frame, height=20, width=60, state='disabled')
+        self.chat_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Connected Clients List
+        clients_frame = tk.Frame(chat_clients_frame)
+        clients_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+        tk.Label(clients_frame, text="Connected Clients:").pack(anchor='nw')
+        self.clients_listbox = tk.Listbox(clients_frame, height=20)
+        self.clients_listbox.pack(fill=tk.Y, expand=True)
+
+        # Message Entry Frame
+        message_frame = tk.Frame(self.window)
+        message_frame.grid(row=5, column=0, sticky='ew', padx=5, pady=5)
+        tk.Label(message_frame, text="Your Message:").grid(row=0, column=0, padx=5, pady=5)
+        self.message_entry = tk.Entry(message_frame, width=55)
+        self.message_entry.grid(row=0, column=1, padx=5, pady=5)
+        tk.Button(message_frame, text="Send", command=self.send_message, width=button_width).grid(row=0, column=2, padx=5, pady=5)
+
+        # Disconnect Button
+        tk.Button(self.window, text="Disconnect", command=self.disconnect, width=button_width).grid(row=6, column=0, padx=5, pady=5)
 
         # Bind Enter key to send message
         self.window.bind('<Return>', lambda event: self.send_message())
@@ -299,48 +318,16 @@ class ChatApp:
 
     # ---------------------------- Networking ---------------------------- #
 
-    def start_server(self):
-        """Starts the server to listen for incoming connections."""
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        self.host_ip_entry.config(state='normal')
-        self.host_ip_entry.delete(0, tk.END)
-        self.host_ip_entry.insert(0, ip_address)
-        self.host_ip_entry.config(state='readonly')
-        try:
-            self.port = int(self.port_entry.get())
-            self.server_socket.bind((ip_address, self.port))
-            self.server_socket.listen(1)
-            self.update_chat(f"Server listening on {ip_address}:{self.port}")
-            threading.Thread(target=self.accept_connections, daemon=True).start()
-        except Exception as e:
-            self.update_chat(f"Server error: {e}")
-
-    def accept_connections(self):
-        """Accepts incoming client connections."""
-        try:
-            if self.server_socket:
-                conn, addr = self.server_socket.accept()
-                self.update_chat(f"Connected to {addr}")
-                self.client_socket = conn
-                self.is_client = False
-                self.start_listening_thread(conn)
-                self.send_public_key()
-        except Exception as e:
-            self.update_chat(f"Connection error: {e}")
-
     def connect_to_server(self):
-        """Connects to a server as a client."""
+        """Connects to the server."""
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         host = self.server_ip_entry.get()
         try:
             self.port = int(self.port_entry.get())
             self.client_socket.connect((host, self.port))
             self.update_chat(f"Connected to server {host}:{self.port}")
-            self.is_client = True
             self.start_listening_thread(self.client_socket)
-            self.send_public_key()
+            self.send_register_message()
         except Exception as e:
             self.update_chat(f"Connection error: {e}")
 
@@ -362,9 +349,8 @@ class ChatApp:
                         new_msg = False
                     full_message += message
                     if len(full_message) - self.header_size == msg_length:
-                        self.handle_received_message(full_message[self.header_size:].decode())
-                        new_msg = True
-                        full_message = b""
+                        break
+                self.handle_received_message(full_message[self.header_size:].decode())
             except Exception as e:
                 self.update_chat(f"Receiving error: {e}")
                 break
@@ -379,68 +365,95 @@ class ChatApp:
             except Exception as e:
                 self.update_chat(f"Sending error: {e}")
         else:
-            self.update_chat("Not connected to any client or server.")
+            self.update_chat("Not connected to any server.")
 
     # ---------------------------- Message Handling ---------------------------- #
 
-    def send_message(self):
-        """Encrypts and sends a message to the connected client/server."""
-        message = self.message_entry.get()
-        if self.other_public_key and self.rsa.key_pair:
-            signature = self.rsa.sign(message)
-            encrypted_message = self.rsa.encrypt(message, self.other_public_key)
+    def send_register_message(self):
+        """Sends a register message to the server with nickname and public key."""
+        if self.client_socket and self.rsa.key_pair:
             nickname = self.nickname_entry.get() or "Anonymous"
-            message_with_signature = {
-                "nickname": nickname,
-                "message": encrypted_message,
-                "signature": signature
+            public_key = {
+                'N': self.rsa.key_pair.public_key.N,
+                'E': self.rsa.key_pair.public_key.E
             }
-            self.send_data(json.dumps(message_with_signature))
-            self.update_chat(f"You: {message}")
-            self.message_entry.delete(0, tk.END)
+            register_message = {
+                'type': 'register',
+                'nickname': nickname,
+                'public_key': public_key
+            }
+            self.send_data(json.dumps(register_message))
+            self.update_chat("Register message sent.")
         else:
-            self.update_chat("Encryption keys not exchanged.")
+            self.update_chat("Cannot register; no connection or keys not generated.")
+
+    def send_message(self):
+        """Encrypts and sends a message to the selected recipient."""
+        message_text = self.message_entry.get()
+        selection = self.clients_listbox.curselection()
+        if selection:
+            recipient = self.clients_listbox.get(selection[0])
+            if recipient == self.nickname_entry.get():
+                self.update_chat("Cannot send message to yourself.")
+                return
+            recipient_public_key = self.other_public_keys.get(recipient)
+            if recipient_public_key and self.rsa.key_pair:
+                signature = self.rsa.sign(message_text)
+                encrypted_message = self.rsa.encrypt(message_text, recipient_public_key)
+                nickname = self.nickname_entry.get() or "Anonymous"
+                message_with_signature = {
+                    'type': 'message',
+                    'sender': nickname,
+                    'recipient': recipient,
+                    'message': encrypted_message,
+                    'signature': signature
+                }
+                self.send_data(json.dumps(message_with_signature))
+                self.update_chat(f"You to {recipient}: {message_text}")
+                self.message_entry.delete(0, tk.END)
+            else:
+                self.update_chat(f"Cannot find public key for recipient {recipient}")
+        else:
+            self.update_chat("No recipient selected.")
 
     def handle_received_message(self, message):
         """Handles a received message."""
-        if message.startswith("KEYS:"):
-            try:
-                _, key_data = message.split(":", 1)
-                N_str, E_str = key_data.split(",", 1)
-                N = int(N_str)
-                E = int(E_str)
-                self.other_public_key = PublicKey(N=N, E=E)
-                self.update_chat("Received public key.")
-                if not self.is_client:
-                    self.send_public_key()
-            except ValueError as e:
-                self.update_chat(f"Public key error: {e}")
-        else:
-            try:
-                received_data = json.loads(message)
-                encrypted_message = received_data["message"]
-                signature = received_data["signature"]
-                nickname = received_data.get("nickname", "Unknown")
+        try:
+            data = json.loads(message)
+            msg_type = data.get('type')
+            if msg_type == 'client_list':
+                clients = data.get('clients', [])
+                self.update_clients_list(clients)
+            elif msg_type == 'message':
+                sender = data.get('sender', 'Unknown')
+                encrypted_message = data.get('message')
+                signature = data.get('signature')
+                public_key = self.other_public_keys.get(sender)
+                if not public_key:
+                    self.update_chat(f"No public key for sender {sender}")
+                    return
                 decrypted_message = self.rsa.decrypt(encrypted_message)
-                if self.rsa.verify(decrypted_message, signature, self.other_public_key):
-                    self.update_chat(f"{nickname}: {decrypted_message}")
+                if self.rsa.verify(decrypted_message, signature, public_key):
+                    self.update_chat(f"{sender}: {decrypted_message}")
                 else:
-                    self.update_chat("Signature verification failed.")
-            except json.JSONDecodeError as e:
-                self.update_chat(f"JSON decoding error: {e}")
-            except Exception as e:
-                self.update_chat(f"Message handling error: {e}")
+                    self.update_chat(f"Signature verification failed for message from {sender}")
+            else:
+                self.update_chat(f"Unknown message type received: {msg_type}")
+        except json.JSONDecodeError as e:
+            self.update_chat(f"JSON decoding error: {e}")
+        except Exception as e:
+            self.update_chat(f"Message handling error: {e}")
 
-    def send_public_key(self):
-        """Sends the public key to the connected client/server."""
-        if self.client_socket and self.rsa.key_pair:
-            N = self.rsa.key_pair.public_key.N
-            E = self.rsa.key_pair.public_key.E
-            key_message = f"KEYS:{N},{E}"
-            self.send_data(key_message)
-            self.update_chat("Public key sent.")
-        else:
-            self.update_chat("Cannot send public key; no connection or keys not generated.")
+    def update_clients_list(self, clients):
+        """Updates the connected clients list."""
+        self.clients_listbox.delete(0, tk.END)
+        self.other_public_keys.clear()
+        for client_info in clients:
+            nickname = client_info['nickname']
+            public_key_data = client_info['public_key']
+            public_key = PublicKey(N=public_key_data['N'], E=public_key_data['E'])
+            self.other_public_keys[nickname] = public_key
+            self.clients_listbox.insert(tk.END, nickname)
 
     # ---------------------------- Utilities ---------------------------- #
 
@@ -452,15 +465,16 @@ class ChatApp:
         self.chat_text.see(tk.END)
 
     def disconnect(self):
-        """Disconnects from the client/server and closes sockets."""
+        """Disconnects from the server and closes sockets."""
         if self.client_socket:
+            try:
+                disconnect_message = {'type': 'disconnect'}
+                self.send_data(json.dumps(disconnect_message))
+            except Exception as e:
+                self.update_chat(f"Error sending disconnect message: {e}")
             self.client_socket.close()
             self.client_socket = None
-            self.update_chat("Disconnected from client/server.")
-        if self.server_socket:
-            self.server_socket.close()
-            self.server_socket = None
-            self.update_chat("Server socket closed.")
+            self.update_chat("Disconnected from server.")
         self.window.destroy()
 
     # ---------------------------- Run Application ---------------------------- #
